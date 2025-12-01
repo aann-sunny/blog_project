@@ -11,12 +11,26 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_PATH = ROOT_DIR / "251201 oppty list.csv"
 PLOT_PATH = ROOT_DIR / "vertical_mau_revenue_quantile_scatter.png"
 QUANTILES_PATH = ROOT_DIR / "vertical_quantiles.csv"
 QUANTILE_LEVELS = (0.2, 0.4, 0.6, 0.8, 1.0)
+CLUSTER_PALETTE = [
+    "#1f77b4",
+    "#ff7f0e",
+    "#2ca02c",
+    "#d62728",
+    "#9467bd",
+    "#8c564b",
+    "#e377c2",
+    "#7f7f7f",
+    "#bcbd22",
+    "#17becf",
+]
 
 
 def _format_value(value: float) -> str:
@@ -82,6 +96,32 @@ def _display_name(vertical_value: str) -> str:
     return vertical_value
 
 
+def assign_clusters(df: pd.DataFrame, n_clusters: int = 5) -> pd.DataFrame:
+    """Assign KMeans clusters using log-scaled MAU and revenue features."""
+    clean_df = df.dropna(subset=["MAU", "Annual Revenue"]).copy()
+    if clean_df.empty:
+        raise ValueError("Cannot cluster because MAU/Annual Revenue data is empty.")
+
+    features = np.log1p(clean_df[["MAU", "Annual Revenue"]].to_numpy(dtype=float))
+    scaler = StandardScaler()
+    scaled = scaler.fit_transform(features)
+
+    kmeans = KMeans(n_clusters=n_clusters, n_init=20, random_state=42)
+    clean_df["Cluster"] = kmeans.fit_predict(scaled)
+
+    merged = df.copy()
+    merged = merged.merge(
+        clean_df[["Account", "Cluster"]],
+        on="Account",
+        how="left",
+        suffixes=("", "_cluster"),
+    )
+    if merged["Cluster"].isna().any():
+        raise ValueError("Cluster assignment missing for some rows.")
+    merged["Cluster"] = merged["Cluster"].astype(int)
+    return merged
+
+
 def compute_quantile_table(df: pd.DataFrame) -> pd.DataFrame:
     records: list[dict[str, float | str]] = []
     for vertical, group in df.groupby("Vertical", sort=True):
@@ -111,6 +151,8 @@ def plot_scatter(df: pd.DataFrame, output_path: Path) -> None:
     cols = 3
     rows = math.ceil(len(verticals) / cols)
     fig, axes = plt.subplots(rows, cols, figsize=(cols * 5.8, rows * 4.6), squeeze=False)
+    clusters = sorted(df["Cluster"].unique())
+    cluster_colors = {cluster: CLUSTER_PALETTE[cluster % len(CLUSTER_PALETTE)] for cluster in clusters}
 
     for idx, vertical in enumerate(verticals):
         ax = axes[idx // cols][idx % cols]
@@ -125,6 +167,7 @@ def plot_scatter(df: pd.DataFrame, output_path: Path) -> None:
             alpha=0.7,
             edgecolors="black",
             linewidths=0.3,
+            c=subset["Cluster"].map(cluster_colors).to_numpy(),
         )
 
         if xticks.size:
@@ -150,8 +193,30 @@ def plot_scatter(df: pd.DataFrame, output_path: Path) -> None:
     for idx in range(len(verticals), total_axes):
         axes[idx // cols][idx % cols].axis("off")
 
-    fig.suptitle("MAU vs Annual Revenue by Vertical (20% Quantile Ticks)", fontsize=14, weight="bold")
-    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    legend_handles = [
+        plt.Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="white",
+            label=f"Cluster {cluster + 1}",
+            markerfacecolor=color,
+            markeredgecolor="black",
+            markersize=7,
+        )
+        for cluster, color in cluster_colors.items()
+    ]
+    fig.legend(
+        handles=legend_handles,
+        loc="lower center",
+        ncol=min(len(legend_handles), 5),
+        fontsize=9,
+        frameon=False,
+        bbox_to_anchor=(0.5, 0.01),
+    )
+
+    fig.suptitle("MAU vs Annual Revenue by Vertical (Quantile Axes, 5 Clusters)", fontsize=14, weight="bold")
+    fig.tight_layout(rect=(0, 0.04, 1, 0.95))
     fig.savefig(output_path, dpi=200)
     plt.close(fig)
     print(f"Saved scatter grid to {output_path}")
@@ -159,8 +224,9 @@ def plot_scatter(df: pd.DataFrame, output_path: Path) -> None:
 
 def main() -> None:
     df = load_data(DATA_PATH)
-    plot_scatter(df, PLOT_PATH)
-    quantile_table = compute_quantile_table(df)
+    clustered_df = assign_clusters(df)
+    plot_scatter(clustered_df, PLOT_PATH)
+    quantile_table = compute_quantile_table(clustered_df)
     quantile_table.to_csv(QUANTILES_PATH, index=False)
     print(f"Saved quantile table to {QUANTILES_PATH}")
 
