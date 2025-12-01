@@ -108,10 +108,14 @@ def plot_scatter(df: pd.DataFrame, output_path: Path) -> None:
             ax.set_xticks(xticks)
             ax.set_xticklabels(xlabels, rotation=35, ha="right", fontsize=8)
             ax.set_xlim(-0.05, 1.05)
+            for ref in xticks:
+                ax.axvline(ref, color="#d3d3d3", linestyle="--", linewidth=0.6, zorder=0)
         if yticks.size:
             ax.set_yticks(yticks)
             ax.set_yticklabels(ylabels, fontsize=8)
             ax.set_ylim(-0.05, 1.05)
+            for ref in yticks:
+                ax.axhline(ref, color="#d3d3d3", linestyle="--", linewidth=0.6, zorder=0)
 
         ax.set_title(_display_name(vertical), fontsize=11)
         ax.set_xlabel("MAU Quantile (equal 20% bins)", fontsize=9)
