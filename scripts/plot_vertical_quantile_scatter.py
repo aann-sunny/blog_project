@@ -16,6 +16,7 @@ from sklearn.preprocessing import StandardScaler
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_PATH = ROOT_DIR / "251201 oppty list.csv"
+DATA_WITH_TIERS_PATH = ROOT_DIR / "251201 oppty list with tiers.csv"
 PLOT_PATH = ROOT_DIR / "vertical_mau_revenue_quantile_scatter.png"
 QUANTILES_PATH = ROOT_DIR / "vertical_quantiles.csv"
 QUANTILE_LEVELS = (0.2, 0.4, 0.6, 0.8, 1.0)
@@ -92,7 +93,6 @@ def load_data(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     df["Annual Revenue"] = _parse_numeric(df["Annual Revenue"])
     df["MAU"] = _parse_numeric(df["MAU"])
-    df = df.dropna(subset=["Annual Revenue", "MAU", "Vertical"])
     return df
 
 
@@ -136,10 +136,8 @@ def assign_clusters(df: pd.DataFrame, n_clusters: int = 5) -> pd.DataFrame:
         how="left",
         suffixes=("", "_cluster"),
     )
-    if merged["Cluster"].isna().any():
-        raise ValueError("Cluster assignment missing for some rows.")
-    merged["Cluster"] = merged["Cluster"].astype(int)
-    merged["TierRank"] = merged["TierRank"].astype(int)
+    merged["Cluster"] = merged["Cluster"].astype("Int64")
+    merged["TierRank"] = merged["TierRank"].astype("Int64")
     return merged
 
 
@@ -164,21 +162,35 @@ def compute_quantile_table(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame.from_records(records)
 
 
+def export_dataset_with_tier(original_path: Path, enriched_df: pd.DataFrame, output_path: Path) -> None:
+    """Write a copy of the original dataset with the Tier column appended."""
+    original_df = pd.read_csv(original_path)
+    tier_info = enriched_df[["Account", "Tier"]].copy()
+    output_df = original_df.merge(tier_info, on="Account", how="left")
+    output_df.to_csv(output_path, index=False)
+    print(f"Saved dataset with Tier column to {output_path}")
+
+
 def plot_scatter(df: pd.DataFrame, output_path: Path) -> None:
-    verticals = sorted(df["Vertical"].unique())
+    verticals = sorted(df["Vertical"].dropna().unique())
     if not verticals:
         raise ValueError("No vertical data found after filtering.")
 
     cols = 3
     rows = math.ceil(len(verticals) / cols)
     fig, axes = plt.subplots(rows, cols, figsize=(cols * 5.8, rows * 4.6), squeeze=False)
-    tier_ranks = sorted(df["TierRank"].unique())
+    tier_ranks = sorted(rank for rank in df["TierRank"].dropna().unique())
     tier_colors = {rank: TIER_COLORS[rank % len(TIER_COLORS)] for rank in tier_ranks}
     tier_names = {rank: f"Tier {rank + 1}" for rank in tier_ranks}
 
     for idx, vertical in enumerate(verticals):
         ax = axes[idx // cols][idx % cols]
-        subset = df[df["Vertical"] == vertical]
+        subset = df[
+            (df["Vertical"] == vertical)
+            & df["MAU"].notna()
+            & df["Annual Revenue"].notna()
+            & df["TierRank"].notna()
+        ]
         x_positions, xticks, xlabels = _quantile_axes(subset["MAU"].to_numpy())
         y_positions, yticks, ylabels = _quantile_axes(subset["Annual Revenue"].to_numpy())
 
@@ -251,6 +263,7 @@ def main() -> None:
     quantile_table = compute_quantile_table(clustered_df)
     quantile_table.to_csv(QUANTILES_PATH, index=False)
     print(f"Saved quantile table to {QUANTILES_PATH}")
+    export_dataset_with_tier(DATA_PATH, clustered_df, DATA_WITH_TIERS_PATH)
 
 
 if __name__ == "__main__":
