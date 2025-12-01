@@ -14,7 +14,9 @@ import pandas as pd
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_PATH = ROOT_DIR / "251201 oppty list.csv"
-OUTPUT_PATH = ROOT_DIR / "vertical_mau_revenue_quantile_scatter.png"
+PLOT_PATH = ROOT_DIR / "vertical_mau_revenue_quantile_scatter.png"
+QUANTILES_PATH = ROOT_DIR / "vertical_quantiles.csv"
+QUANTILE_LEVELS = (0.2, 0.4, 0.6, 0.8, 1.0)
 
 
 def _format_value(value: float) -> str:
@@ -80,6 +82,27 @@ def _display_name(vertical_value: str) -> str:
     return vertical_value
 
 
+def compute_quantile_table(df: pd.DataFrame) -> pd.DataFrame:
+    records: list[dict[str, float | str]] = []
+    for vertical, group in df.groupby("Vertical", sort=True):
+        record: dict[str, float | str] = {
+            "Vertical": vertical,
+            "Vertical Display": _display_name(vertical),
+        }
+        for metric in ("MAU", "Annual Revenue"):
+            values = group[metric].dropna().to_numpy()
+            for q in QUANTILE_LEVELS:
+                key = f"{metric}_q{int(q * 100)}"
+                if values.size == 0:
+                    record[key] = np.nan
+                else:
+                    quant_value = float(np.quantile(values, q, method="linear"))
+                    record[key] = int(round(quant_value))
+        records.append(record)
+
+    return pd.DataFrame.from_records(records)
+
+
 def plot_scatter(df: pd.DataFrame, output_path: Path) -> None:
     verticals = sorted(df["Vertical"].unique())
     if not verticals:
@@ -136,7 +159,10 @@ def plot_scatter(df: pd.DataFrame, output_path: Path) -> None:
 
 def main() -> None:
     df = load_data(DATA_PATH)
-    plot_scatter(df, OUTPUT_PATH)
+    plot_scatter(df, PLOT_PATH)
+    quantile_table = compute_quantile_table(df)
+    quantile_table.to_csv(QUANTILES_PATH, index=False)
+    print(f"Saved quantile table to {QUANTILES_PATH}")
 
 
 if __name__ == "__main__":
