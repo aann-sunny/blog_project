@@ -31,6 +31,13 @@ CLUSTER_PALETTE = [
     "#bcbd22",
     "#17becf",
 ]
+TIER_COLORS = [
+    "#27408b",  # Tier 1 - deep blue
+    "#1c8c8c",
+    "#5aa02c",
+    "#ff8c00",
+    "#c23b22",  # Tier 5 - warm red
+]
 
 
 def _format_value(value: float) -> str:
@@ -109,9 +116,22 @@ def assign_clusters(df: pd.DataFrame, n_clusters: int = 5) -> pd.DataFrame:
     kmeans = KMeans(n_clusters=n_clusters, n_init=20, random_state=42)
     clean_df["Cluster"] = kmeans.fit_predict(scaled)
 
+    center_scores = kmeans.cluster_centers_.sum(axis=1)
+    tier_order = np.argsort(-center_scores)
+    cluster_to_tier_rank = {cluster_idx: rank for rank, cluster_idx in enumerate(tier_order)}
+    cluster_to_tier_name = {cluster_idx: f"Tier {rank + 1}" for rank, cluster_idx in enumerate(tier_order)}
+    cluster_to_color = {
+        cluster_idx: TIER_COLORS[rank % len(TIER_COLORS)]
+        for cluster_idx, rank in cluster_to_tier_rank.items()
+    }
+
+    clean_df["TierRank"] = clean_df["Cluster"].map(cluster_to_tier_rank)
+    clean_df["Tier"] = clean_df["Cluster"].map(cluster_to_tier_name)
+    clean_df["ClusterColor"] = clean_df["Cluster"].map(cluster_to_color)
+
     merged = df.copy()
     merged = merged.merge(
-        clean_df[["Account", "Cluster"]],
+        clean_df[["Account", "Cluster", "TierRank", "Tier", "ClusterColor"]],
         on="Account",
         how="left",
         suffixes=("", "_cluster"),
@@ -119,6 +139,7 @@ def assign_clusters(df: pd.DataFrame, n_clusters: int = 5) -> pd.DataFrame:
     if merged["Cluster"].isna().any():
         raise ValueError("Cluster assignment missing for some rows.")
     merged["Cluster"] = merged["Cluster"].astype(int)
+    merged["TierRank"] = merged["TierRank"].astype(int)
     return merged
 
 
@@ -151,8 +172,9 @@ def plot_scatter(df: pd.DataFrame, output_path: Path) -> None:
     cols = 3
     rows = math.ceil(len(verticals) / cols)
     fig, axes = plt.subplots(rows, cols, figsize=(cols * 5.8, rows * 4.6), squeeze=False)
-    clusters = sorted(df["Cluster"].unique())
-    cluster_colors = {cluster: CLUSTER_PALETTE[cluster % len(CLUSTER_PALETTE)] for cluster in clusters}
+    tier_ranks = sorted(df["TierRank"].unique())
+    tier_colors = {rank: TIER_COLORS[rank % len(TIER_COLORS)] for rank in tier_ranks}
+    tier_names = {rank: f"Tier {rank + 1}" for rank in tier_ranks}
 
     for idx, vertical in enumerate(verticals):
         ax = axes[idx // cols][idx % cols]
@@ -167,7 +189,7 @@ def plot_scatter(df: pd.DataFrame, output_path: Path) -> None:
             alpha=0.7,
             edgecolors="black",
             linewidths=0.3,
-            c=subset["Cluster"].map(cluster_colors).to_numpy(),
+            c=subset["TierRank"].map(tier_colors).to_numpy(),
         )
 
         if xticks.size:
@@ -199,12 +221,12 @@ def plot_scatter(df: pd.DataFrame, output_path: Path) -> None:
             [0],
             marker="o",
             color="white",
-            label=f"Cluster {cluster + 1}",
-            markerfacecolor=color,
+            label=tier_names[rank],
+            markerfacecolor=tier_colors[rank],
             markeredgecolor="black",
             markersize=7,
         )
-        for cluster, color in cluster_colors.items()
+        for rank in tier_ranks
     ]
     fig.legend(
         handles=legend_handles,
