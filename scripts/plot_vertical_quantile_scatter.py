@@ -16,7 +16,6 @@ from sklearn.preprocessing import StandardScaler
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_PATH = ROOT_DIR / "251201 oppty list.csv"
-DATA_WITH_TIERS_PATH = ROOT_DIR / "251201 oppty list with tiers.csv"
 PLOT_PATH = ROOT_DIR / "vertical_mau_revenue_quantile_scatter.png"
 QUANTILES_PATH = ROOT_DIR / "vertical_quantiles.csv"
 QUANTILE_LEVELS = (0.2, 0.4, 0.6, 0.8, 1.0)
@@ -263,7 +262,7 @@ def main() -> None:
     quantile_table = compute_quantile_table(clustered_df)
     quantile_table.to_csv(QUANTILES_PATH, index=False)
     print(f"Saved quantile table to {QUANTILES_PATH}")
-    export_dataset_with_tier(DATA_PATH, clustered_df, DATA_WITH_TIERS_PATH)
+    export_dataset_with_tier(DATA_PATH, clustered_df, DATA_PATH)
 
 
 if __name__ == "__main__":
