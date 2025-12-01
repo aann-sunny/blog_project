@@ -45,15 +45,24 @@ def _parse_numeric(series: pd.Series) -> pd.Series:
     return pd.to_numeric(cleaned, errors="coerce")
 
 
-def _quantile_ticks(values: np.ndarray) -> tuple[list[float], list[str]]:
-    """Return tick values and labels at every 20% quantile."""
+def _quantile_axes(values: np.ndarray) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """Return quantile-based positions plus evenly spaced ticks and labels."""
     if values.size == 0:
-        return [], []
+        return values, np.array([]), []
 
-    quantiles = np.linspace(0, 1, 6)
-    ticks = np.quantile(values, quantiles, method="linear")
-    labels = [f"{int(q * 100)}% ({_format_value(tick)})" for q, tick in zip(quantiles, ticks)]
-    return ticks.tolist(), labels
+    sorted_idx = np.argsort(values)
+    positions = np.empty_like(values, dtype=float)
+    if values.size == 1:
+        positions[sorted_idx] = 0.5
+    else:
+        positions[sorted_idx] = np.linspace(0.0, 1.0, values.size)
+
+    quantiles = np.linspace(0.0, 1.0, 6)
+    tick_labels = [
+        f"{int(q * 100)}% ({_format_value(val)})"
+        for q, val in zip(quantiles, np.quantile(values, quantiles, method="linear"))
+    ]
+    return positions, quantiles, tick_labels
 
 
 def load_data(path: Path) -> pd.DataFrame:
@@ -72,8 +81,6 @@ def _display_name(vertical_value: str) -> str:
 
 
 def plot_scatter(df: pd.DataFrame, output_path: Path) -> None:
-    df = df.copy()
-    df["Vertical Display"] = df["Vertical"].apply(_display_name)
     verticals = sorted(df["Vertical"].unique())
     if not verticals:
         raise ValueError("No vertical data found after filtering.")
@@ -85,28 +92,30 @@ def plot_scatter(df: pd.DataFrame, output_path: Path) -> None:
     for idx, vertical in enumerate(verticals):
         ax = axes[idx // cols][idx % cols]
         subset = df[df["Vertical"] == vertical]
+        x_positions, xticks, xlabels = _quantile_axes(subset["MAU"].to_numpy())
+        y_positions, yticks, ylabels = _quantile_axes(subset["Annual Revenue"].to_numpy())
+
         ax.scatter(
-            subset["MAU"],
-            subset["Annual Revenue"],
+            x_positions,
+            y_positions,
             s=36,
             alpha=0.7,
             edgecolors="black",
             linewidths=0.3,
         )
 
-        xticks, xlabels = _quantile_ticks(subset["MAU"].to_numpy())
-        yticks, ylabels = _quantile_ticks(subset["Annual Revenue"].to_numpy())
-
-        if xticks:
+        if xticks.size:
             ax.set_xticks(xticks)
             ax.set_xticklabels(xlabels, rotation=35, ha="right", fontsize=8)
-        if yticks:
+            ax.set_xlim(-0.05, 1.05)
+        if yticks.size:
             ax.set_yticks(yticks)
             ax.set_yticklabels(ylabels, fontsize=8)
+            ax.set_ylim(-0.05, 1.05)
 
         ax.set_title(_display_name(vertical), fontsize=11)
-        ax.set_xlabel("MAU", fontsize=9)
-        ax.set_ylabel("Annual Revenue (KRW)", fontsize=9)
+        ax.set_xlabel("MAU Quantile (equal 20% bins)", fontsize=9)
+        ax.set_ylabel("Revenue Quantile (equal 20% bins)", fontsize=9)
         ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.4)
 
     # Hide any unused axes.
